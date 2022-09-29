@@ -3,16 +3,33 @@ from os.path import isdir, isfile, join, split
 import importlib.util
 import sys
 from inspect import isclass
+from typing import Callable, List
+from dataclasses import dataclass
 
-from generichtf.interfaces import ToolFactory, TestEnvironment
+from generichtf.base import ToolFactory, TestEnvironment
 from generichtf.exceptions import *
 
 
-class TestInstance:
-    pass
+@dataclass
+class TestProcedureEntry:
+    name: str
+    parameters: List
+    outputs: List
+    procedure: Callable
 
 
 class TestSuite:
+    def _register_procedure(self, name: str, parameters=None, outputs=None):
+        parameters = parameters if parameters else []
+        outputs = outputs if outputs else []
+
+        def inner_register_procedure(test_function: Callable):
+            entry = TestProcedureEntry(name, parameters, outputs, test_function)
+            self.procedures[name] = entry
+            return test_function
+
+        return inner_register_procedure
+
     def _load_tool_file(self, tool_file_path: str):
         module_name = split(tool_file_path)[-1].removesuffix('.py')
         spec = importlib.util.spec_from_file_location(module_name, tool_file_path)
@@ -39,21 +56,39 @@ class TestSuite:
         except Exception as e:
             raise e
 
-    def _load_tool_files(self, tools_dir_path: str):
-        tool_file_paths = [join(tools_dir_path, filename) for filename in listdir(tools_dir_path) if
-                           isfile(join(tools_dir_path, filename))]
+    def _load_procedures_file(self, procedures_file_path: str):
+        module_name = split(procedures_file_path)[-1].removesuffix('.py')
+        spec = importlib.util.spec_from_file_location(module_name, procedures_file_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        module.__dict__['register_procedure'] = self._register_procedure
 
-        for tool_file_path in tool_file_paths:
-            self._load_tool_file(tool_file_path)
+        try:
+            # run the module
+            spec.loader.exec_module(module)
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def _load_module_files(modules_dir_path: str, module_loading_function: Callable):
+        module_file_paths = [join(modules_dir_path, filename) for filename in listdir(modules_dir_path) if
+                             isfile(join(modules_dir_path, filename))]
+
+        for module_file_path in module_file_paths:
+            module_loading_function(module_file_path)
 
     def __init__(self, root_dir: str):
         self.env = TestEnvironment()
         self.tools = dict()
+        self.procedures = dict()
 
         dir_list = [dir_name for dir_name in listdir(root_dir) if isdir(join(root_dir, dir_name))]
-        assert ('tests' in dir_list and 'tools' in dir_list)
+        assert ('procedures' in dir_list and 'tools' in dir_list)
 
-        tests_dir_path = join(root_dir, 'tests')
         tools_dir_path = join(root_dir, 'tools')
+        self._load_module_files(tools_dir_path, self._load_tool_file)
 
-        self._load_tool_files(tools_dir_path)
+        procedures_dir_path = join(root_dir, 'procedures')
+        self._load_module_files(procedures_dir_path, self._load_procedures_file)
+
+        pass

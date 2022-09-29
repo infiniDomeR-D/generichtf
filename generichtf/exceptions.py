@@ -4,3 +4,7 @@ class GenericHTFException(Exception):
 
 class DuplicateToolName(GenericHTFException):
     pass
+
+
+class DuplicateFunction(GenericHTFException):
+    pass
