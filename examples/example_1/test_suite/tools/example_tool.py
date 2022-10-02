@@ -1,4 +1,4 @@
-from generichtf.interfaces import ToolFactory, TestEnvironment
+from generichtf.base import ToolFactory, TestEnvironment
 
 
 class ExampleToolFactory(ToolFactory):
