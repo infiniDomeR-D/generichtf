@@ -2,12 +2,11 @@ from os import listdir
 from os.path import isdir, isfile, join, split
 import importlib.util
 import sys
-from inspect import isclass
 from typing import Callable, List
 from dataclasses import dataclass
 from threading import Thread
 
-from generichtf.base import ToolFactory, TestEnvironment
+from generichtf.base import TestSession, ProcedureHandle, ProcedureStatus
 from generichtf.exceptions import *
 
 
@@ -21,18 +20,55 @@ class TestProcedureEntry:
 
 class ProcedureRunner:
     def __init__(self, procedure_entry: TestProcedureEntry):
-        self.procedure_entry = TestProcedureEntry
+        self.procedure_entry = procedure_entry
+        self._status = ProcedureStatus.STAGED
+        self._result = None
+        self._run_thread = None
+
+    def _get_status(self):
+        return self._status
+
+    def _get_result(self):
+        return self._result
+
+    def _wait(self):
+        pass
+
+    def get_procedure_handle(self) -> ProcedureHandle:
+        handle = ProcedureHandle(self._get_status, self._get_result, self._wait)
+        return handle
+
+    def run(self):
+        def wrapped_function():
+            try:
+                result = self.procedure_entry.procedure()
+            except Exception as e:
+                result = e
+
+            self._result = result
+
+        run_thread = Thread(target=wrapped_function)
+
+        self._run_thread = run_thread
+        run_thread.start()
 
 
 class TestSuite:
+    def _register_tool(self, name: str):
+        def inner_register_tool(tool_instance_function: Callable):
+            self.tools[name] = tool_instance_function
+            return tool_instance_function
+
+        return inner_register_tool
+
     def _register_procedure(self, name: str, parameters=None, outputs=None):
         parameters = parameters if parameters else []
         outputs = outputs if outputs else []
 
-        def inner_register_procedure(test_function: Callable):
-            entry = TestProcedureEntry(name, parameters, outputs, test_function)
+        def inner_register_procedure(procedure_function: Callable):
+            entry = TestProcedureEntry(name, parameters, outputs, procedure_function)
             self.procedures[name] = entry
-            return test_function
+            return procedure_function
 
         return inner_register_procedure
 
@@ -49,24 +85,11 @@ class TestSuite:
         spec = importlib.util.spec_from_file_location(module_name, tool_file_path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
+        module.__dict__['register_tool'] = self._register_tool
+
         try:
             # run the module
             spec.loader.exec_module(module)
-
-            # list all tool factories in the module
-            module_tools = [item for item in module.__dict__.values() if
-                            isclass(item) and issubclass(item, ToolFactory) and item != ToolFactory]
-
-            # add each tool factory instance to the dictionary of tools
-            for module_tool in module_tools:
-                tool_name = module_tool.get_tool_name()
-
-                if tool_name in self.tools.keys():
-                    raise DuplicateToolName
-
-                self.tools[tool_name] = module_tool(self.env)
-                self.env.loaded_tools.append(tool_name)
-
         except Exception as e:
             raise e
 
@@ -104,8 +127,14 @@ class TestSuite:
         for module_file_path in module_file_paths:
             module_loading_function(module_file_path)
 
+    def run_flow(self, flow_name: str):
+        flow_function = self.flows[flow_name]
+
+        session = MainTestSession(self)
+
+        flow_function(session)
+
     def __init__(self, root_dir: str):
-        self.env = TestEnvironment()
         self.tools = dict()
         self.procedures = dict()
         self.flows = dict()
@@ -122,4 +151,16 @@ class TestSuite:
         flows_dir_path = join(root_dir, 'flows')
         self._load_module_files(flows_dir_path, self._load_flows_file)
 
+
+class MainTestSession(TestSession):
+    def __init__(self, test_suite: TestSuite):
+        self.test_suite = test_suite
+
+    def end_session(self, success: bool):
         pass
+
+    def run_procedure(self, procedure_name: str, **parameters):
+        procedure_entry = self.test_suite.procedures[procedure_name]
+
+        runner = ProcedureRunner(procedure_entry)
+        runner.run()

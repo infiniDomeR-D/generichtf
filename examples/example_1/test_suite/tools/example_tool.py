@@ -1,13 +1,11 @@
-from generichtf.base import ToolFactory, TestEnvironment
+class ExampleTool:
+    def __init__(self, instance_name: str):
+        self.instance_name = instance_name
+
+    def use_tool(self):
+        print(f"Hello from example_tool: {self.instance_name}")
 
 
-class ExampleToolFactory(ToolFactory):
-    @staticmethod
-    def get_tool_name() -> str:
-        return 'ex_tool'
-
-    def __init__(self, test_environment: TestEnvironment):
-        self.test_environment = test_environment
-
-    def get_instance(self, *args, **kwargs) -> object:
-        pass
+@register_tool('example_tool')
+def get_example_tool_instance(*args):
+    return ExampleTool(args[0])

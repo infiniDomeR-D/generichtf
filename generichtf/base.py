@@ -6,21 +6,36 @@ from enum import Enum, auto, unique
 
 @unique
 class ProcedureStatus(Enum):
+    STAGED = auto()
     ONGOING = auto()
     COULD_NOT_COMPLETE = auto()
     EXCEPTED = auto()
     CRASHED = auto()
+    CANCELLED = auto()
     COMPLETED = auto()
 
 
-@dataclass
-class TestEnvironment:
-    loaded_tools: List[str] = field(default_factory=list)
+class ProcedureHandle:
+    def __init__(self, status_function: Callable, result_function: Callable, wait_function: Callable):
+        self._status_function = status_function
+        self._result_function = result_function
+        self._wait_function = wait_function
+
+    @property
+    def status(self) -> ProcedureStatus:
+        return self._status_function()
+
+    @property
+    def result(self):
+        return self._result_function()
+
+    def wait(self):
+        self._wait_function()
 
 
 class TestSession(ABC):
     @abstractmethod
-    def run_procedure(self, procedure_name: str, **parameters):
+    def run_procedure(self, procedure_name: str, **parameters) -> ProcedureHandle:
         pass
 
     @abstractmethod
@@ -30,19 +45,3 @@ class TestSession(ABC):
 
 class TestReport(ABC):
     pass
-
-
-class ToolFactory(ABC):
-
-    @abstractmethod
-    def __init__(self, test_environment: TestEnvironment):
-        pass
-
-    @abstractmethod
-    def get_instance(self, *args, **kwargs) -> object:
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def get_tool_name() -> str:
-        pass
