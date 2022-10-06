@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Callable
 from enum import Enum, auto, unique
+from generichtf.exceptions import *
 
 
 @unique
@@ -16,10 +17,12 @@ class ProcedureStatus(Enum):
 
 
 class ProcedureHandle:
-    def __init__(self, status_function: Callable, result_function: Callable, wait_function: Callable):
+    def __init__(self, status_function: Callable, result_function: Callable, wait_function: Callable,
+                 run_function: Callable):
         self._status_function = status_function
         self._result_function = result_function
         self._wait_function = wait_function
+        self._run_function = run_function
 
     @property
     def status(self) -> ProcedureStatus:
@@ -32,10 +35,16 @@ class ProcedureHandle:
     def wait(self):
         self._wait_function()
 
+    def run(self):
+        if self.status == ProcedureStatus.STAGED:
+            self._run_function()
+        else:
+            raise ProcedureIsNotStaged
+
 
 class TestSession(ABC):
     @abstractmethod
-    def run_procedure(self, procedure_name: str, **parameters) -> ProcedureHandle:
+    def stage_procedure(self, procedure_name: str, **parameters) -> ProcedureHandle:
         pass
 
     @abstractmethod

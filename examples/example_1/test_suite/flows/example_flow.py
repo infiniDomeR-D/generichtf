@@ -1,8 +1,11 @@
 from generichtf.base import TestSession
 
 
+# noinspection PyUnresolvedReferences
 @register_flow('example_flow')
 def example_flow(test_session: TestSession):
-    test_session.run_procedure('example_procedure')
+    handle = test_session.stage_procedure('example_procedure', example_parameter='example parameter value')
+    handle.run()
+    handle.wait()
 
     test_session.end_session(True)

@@ -6,6 +6,7 @@ class ExampleTool:
         print(f"Hello from example_tool: {self.instance_name}")
 
 
+# noinspection PyUnresolvedReferences
 @register_tool('example_tool')
-def get_example_tool_instance(*args):
-    return ExampleTool(args[0])
+def get_example_tool_instance(association: str):
+    return ExampleTool(association)

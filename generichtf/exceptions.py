@@ -8,3 +8,7 @@ class DuplicateToolName(GenericHTFException):
 
 class DuplicateFunction(GenericHTFException):
     pass
+
+
+class ProcedureIsNotStaged(GenericHTFException):
+    pass
