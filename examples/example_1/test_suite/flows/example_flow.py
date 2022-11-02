@@ -7,5 +7,3 @@ def example_flow(test_session: TestSession):
     handle = test_session.stage_procedure('example_procedure', example_parameter='example parameter value')
     handle.run()
     handle.wait()
-
-    test_session.end_session(True)

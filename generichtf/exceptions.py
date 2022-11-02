@@ -10,5 +10,9 @@ class DuplicateFunction(GenericHTFException):
     pass
 
 
+class TestFlowDoesNotExist(GenericHTFException):
+    pass
+
+
 class ProcedureIsNotStaged(GenericHTFException):
     pass

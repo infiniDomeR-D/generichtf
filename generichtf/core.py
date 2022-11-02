@@ -2,12 +2,16 @@ from os import listdir
 from os.path import isdir, isfile, join, split
 import importlib.util
 import sys
-from typing import Callable, List
+from typing import Callable, List, Dict
 from dataclasses import dataclass
 from threading import Thread
 from inspect import signature, Parameter
-from generichtf.base import TestSession, ProcedureHandle, ProcedureStatus
-from generichtf.exceptions import *
+
+from generichtf.base import TestSessionStatus
+
+from .base import TestSession, ProcedureHandle, ProcedureStatus, TestSuiteView
+from .exceptions import *
+from datetime import datetime
 
 
 @dataclass
@@ -19,10 +23,19 @@ class TestProcedureEntry:
 
 
 class TestSuite:
+    # TODO: make this scalable
+    def _load_builtin_tools(self):
 
-    def _register_tool(self, name: str):
+        def get_config_tool_instance(*args):
+            return self.configurations
+
+        self.tools['config'] = get_config_tool_instance
+
+    def _register_tool(self, name: str, deconstructor: Callable = None):
         def inner_register_tool(tool_instance_function: Callable):
             self.tools[name] = tool_instance_function
+            if deconstructor:
+                self.tool_deconstructors[name] = deconstructor
             return tool_instance_function
 
         return inner_register_tool
@@ -33,6 +46,8 @@ class TestSuite:
             function_name = self.procedure_function_to_name[procedure_function]
 
             self.tool_procedure_associations[tool_name, function_name] = tool_parameters
+
+            return procedure_function
 
         return inner_associate_tool
 
@@ -105,21 +120,33 @@ class TestSuite:
             module_loading_function(module_file_path)
 
     def run_flow(self, flow_name: str):
+        if flow_name not in self.flows:
+            raise TestFlowDoesNotExist
+
         flow_function = self.flows[flow_name]
 
-        session = MainTestSession(self)
+        session = PrimaryTestSession(self)
 
-        flow_function(session)
+        try:
+            flow_function(session)
+        except Exception as e:
+            session.indicate_exception()
+
+        return session.findings
 
     def __init__(self, root_dir: str):
         self.tools = dict()
         self.procedures = dict()
         self.procedure_function_to_name = dict()
         self.tool_procedure_associations = dict()
+        self.tool_deconstructors = dict()
         self.flows = dict()
+        self.configurations = dict()
 
         dir_list = [dir_name for dir_name in listdir(root_dir) if isdir(join(root_dir, dir_name))]
         assert ('procedures' in dir_list and 'tools' in dir_list and 'flows' in dir_list)
+
+        self._load_builtin_tools()
 
         tools_dir_path = join(root_dir, 'tools')
         self._load_module_files(tools_dir_path, self._load_tool_file)
@@ -130,6 +157,24 @@ class TestSuite:
         flows_dir_path = join(root_dir, 'flows')
         self._load_module_files(flows_dir_path, self._load_flows_file)
 
+    def get_view(self) -> TestSuiteView:
+        return ConcreteTestSuiteView(self)
+
+
+class ConcreteTestSuiteView(TestSuiteView):
+
+    def __init__(self, test_suite: TestSuite):
+        self.test_suite = test_suite
+
+    # TODO: implement wrapping of these dictionaries
+    @property
+    def configurations(self) -> Dict:
+        return self.test_suite.configurations
+
+    @property
+    def tools(self) -> Dict:
+        return self.test_suite.tools
+
 
 class ProcedureRunner:
     def __init__(self, procedure_entry: TestProcedureEntry, test_suite: TestSuite, parameters: dict):
@@ -139,10 +184,17 @@ class ProcedureRunner:
         self._run_thread = None
         self._test_suite = test_suite
         self._parameters = parameters
+        self._bound_deconstructors = []
+        self._start_time = None
+        self._end_time = None
 
     def _find_dependency(self, tool_name: str, procedure_function):
         procedure_function_name = self._test_suite.procedure_function_to_name[procedure_function]
-        pass_arg = self._test_suite.tool_procedure_associations[tool_name, procedure_function_name]
+
+        pass_arg = ()
+
+        if (tool_name, procedure_function_name) in self._test_suite.tool_procedure_associations:
+            pass_arg = self._test_suite.tool_procedure_associations[tool_name, procedure_function_name]
 
         return pass_arg
 
@@ -167,18 +219,35 @@ class ProcedureRunner:
                 if parameter_kind in {Parameter.KEYWORD_ONLY, Parameter.VAR_KEYWORD}:
                     break
 
-                tool_instance = self._test_suite.tools[tool_name](
-                    *self._find_dependency(tool_name, self.procedure_entry.procedure_function))
+                dep = self._find_dependency(tool_name, self.procedure_entry.procedure_function)
+
+                tool_instance = self._test_suite.tools[tool_name](self._test_suite.get_view(), *dep)
 
                 pass_args.append(tool_instance)
 
+                if tool_name in self._test_suite.tool_deconstructors:
+                    deconstructor = self._test_suite.tool_deconstructors[tool_name]
+
+                    def bound_deconstructor():
+                        deconstructor(tool_instance)
+
+                    self._bound_deconstructors.append(bound_deconstructor)
+
             try:
+                self._start_time = datetime.now()
                 self._status = ProcedureStatus.ONGOING
                 result = self.procedure_entry.procedure_function(*pass_args, **self._parameters)
                 self._status = ProcedureStatus.COMPLETED
+                self._end_time = datetime.now()
             except Exception as e:
                 self._status = ProcedureStatus.EXCEPTED
                 result = e
+
+            for bound_deconstructor in self._bound_deconstructors:
+                try:
+                    bound_deconstructor()
+                except:
+                    pass
 
             self._result = result
 
@@ -186,17 +255,33 @@ class ProcedureRunner:
             self._run_thread = Thread(target=thread_function)
             self._run_thread.start()
 
+    def _get_running_time(self):
+        if not self._start_time:
+            return None
+        elif not self._end_time:
+            return (datetime.now() - self._start_time).total_seconds()
+        else:
+            return (self._end_time - self._start_time).total_seconds()
+
     def get_procedure_handle(self) -> ProcedureHandle:
-        handle = ProcedureHandle(self._get_status, self._get_result, self._wait, self._run)
+        handle = ProcedureHandle(self._get_status, self._get_result, self._wait, self._run, self._get_running_time)
         return handle
 
 
-class MainTestSession(TestSession):
+class PrimaryTestSession(TestSession):
+
     def __init__(self, test_suite: TestSuite):
         self.test_suite = test_suite
+        self._findings = dict()
+        self._status = TestSessionStatus.UNKNOWN
 
-    def end_session(self, success: bool):
-        pass
+    @property
+    def status(self) -> TestSessionStatus:
+        return self._status
+
+    @property
+    def findings(self):
+        return self._findings
 
     def stage_procedure(self, procedure_name: str, **parameters):
         procedure_entry = self.test_suite.procedures[procedure_name]
@@ -205,3 +290,18 @@ class MainTestSession(TestSession):
         handle = runner.get_procedure_handle()
 
         return handle
+
+    def run_flow(self, flow_name: str):
+        return self.test_suite.run_flow(flow_name)
+
+    def post_finding(self, name: str, finding: object):
+        self._findings[name] = finding
+
+    def indicate_completion(self):
+        self._status = TestSessionStatus.COMPLETED
+
+    def indicate_non_completion(self):
+        self._status = TestSessionStatus.COULD_NOT_COMPLETE
+
+    def indicate_exception(self):
+        self._status = TestSessionStatus.EXCEPTED
