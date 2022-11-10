@@ -92,6 +92,10 @@ class TestSession(ABC):
     def indicate_exception(self):
         pass
 
+    @abstractmethod
+    def log(self, message: str):
+        pass
+
 
 class TestSuiteView(ABC):
     @property

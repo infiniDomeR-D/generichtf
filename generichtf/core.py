@@ -125,16 +125,16 @@ class TestSuite:
 
         flow_function = self.flows[flow_name]
 
-        session = PrimaryTestSession(self)
+        session = PrimaryTestSession(self, self._log_function)
 
         try:
             flow_function(session)
         except Exception as e:
             session.indicate_exception()
 
-        return session.findings
+        return session._status, session.findings
 
-    def __init__(self, root_dir: str):
+    def __init__(self, root_dir: str, log_function: Callable = None):
         self.tools = dict()
         self.procedures = dict()
         self.procedure_function_to_name = dict()
@@ -142,6 +142,7 @@ class TestSuite:
         self.tool_deconstructors = dict()
         self.flows = dict()
         self.configurations = dict()
+        self._log_function = log_function
 
         dir_list = [dir_name for dir_name in listdir(root_dir) if isdir(join(root_dir, dir_name))]
         assert ('procedures' in dir_list and 'tools' in dir_list and 'flows' in dir_list)
@@ -270,14 +271,19 @@ class ProcedureRunner:
 
 class PrimaryTestSession(TestSession):
 
-    def __init__(self, test_suite: TestSuite):
+    def __init__(self, test_suite: TestSuite, log_function: Callable = None):
         self.test_suite = test_suite
         self._findings = dict()
         self._status = TestSessionStatus.UNKNOWN
+        self._log_function = log_function
 
     @property
     def status(self) -> TestSessionStatus:
         return self._status
+
+    def log(self, message: str):
+        if self._log_function:
+            self._log_function(message)
 
     @property
     def findings(self):
