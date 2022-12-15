@@ -119,20 +119,20 @@ class TestSuite:
         for module_file_path in module_file_paths:
             module_loading_function(module_file_path)
 
-    def run_flow(self, flow_name: str):
+    def run_flow(self, flow_name: str, parameters: None | dict = None):
         if flow_name not in self.flows:
             raise TestFlowDoesNotExist
 
         flow_function = self.flows[flow_name]
 
-        session = PrimaryTestSession(self, self._log_function)
+        session = PrimaryTestSession(self, self._log_function, parameters)
 
         try:
             flow_function(session)
         except Exception as e:
             session.indicate_exception()
 
-        return session._status, session.findings
+        return session.status, session.findings
 
     def __init__(self, root_dir: str, log_function: Callable = None):
         self.tools = dict()
@@ -213,26 +213,30 @@ class ProcedureRunner:
         def thread_function():
             sig = signature(self.procedure_entry.procedure_function)
             pass_args = []
+            try:
+                for tool_name in sig.parameters:
+                    parameter_kind = sig.parameters[tool_name].kind
 
-            for tool_name in sig.parameters:
-                parameter_kind = sig.parameters[tool_name].kind
+                    if parameter_kind in {Parameter.KEYWORD_ONLY, Parameter.VAR_KEYWORD}:
+                        break
 
-                if parameter_kind in {Parameter.KEYWORD_ONLY, Parameter.VAR_KEYWORD}:
-                    break
+                    dep = self._find_dependency(tool_name, self.procedure_entry.procedure_function)
 
-                dep = self._find_dependency(tool_name, self.procedure_entry.procedure_function)
+                    tool_instance = self._test_suite.tools[tool_name](self._test_suite.get_view(), *dep)
 
-                tool_instance = self._test_suite.tools[tool_name](self._test_suite.get_view(), *dep)
+                    pass_args.append(tool_instance)
 
-                pass_args.append(tool_instance)
+                    if tool_name in self._test_suite.tool_deconstructors:
+                        deconstructor = self._test_suite.tool_deconstructors[tool_name]
 
-                if tool_name in self._test_suite.tool_deconstructors:
-                    deconstructor = self._test_suite.tool_deconstructors[tool_name]
+                        def bound_deconstructor(instance = tool_instance):
+                            deconstructor(instance)
 
-                    def bound_deconstructor():
-                        deconstructor(tool_instance)
-
-                    self._bound_deconstructors.append(bound_deconstructor)
+                        self._bound_deconstructors.append(bound_deconstructor)
+            except Exception as e:
+                self._status = ProcedureStatus.DEPENDENCY_EXCEPTION
+                self._result = e
+                return
 
             try:
                 self._start_time = datetime.now()
@@ -247,7 +251,7 @@ class ProcedureRunner:
             for bound_deconstructor in self._bound_deconstructors:
                 try:
                     bound_deconstructor()
-                except:
+                except Exception as e:
                     pass
 
             self._result = result
@@ -271,8 +275,14 @@ class ProcedureRunner:
 
 class PrimaryTestSession(TestSession):
 
-    def __init__(self, test_suite: TestSuite, log_function: Callable = None):
+    def __init__(self, test_suite: TestSuite, log_function: Callable = None, parameters: dict | None = None):
         self.test_suite = test_suite
+
+        if parameters:
+            self._parameters = parameters
+        else:
+            self._parameters = dict()
+
         self._findings = dict()
         self._status = TestSessionStatus.UNKNOWN
         self._log_function = log_function
@@ -286,6 +296,10 @@ class PrimaryTestSession(TestSession):
             self._log_function(message)
 
     @property
+    def parameters(self) -> dict:
+        return self._parameters
+
+    @property
     def findings(self):
         return self._findings
 
@@ -297,8 +311,13 @@ class PrimaryTestSession(TestSession):
 
         return handle
 
-    def run_flow(self, flow_name: str):
-        return self.test_suite.run_flow(flow_name)
+    def run_flow(self, flow_name: str, merge_findings: bool = True, parameters: None | dict = None):
+        status, findings = self.test_suite.run_flow(flow_name, parameters)
+
+        if merge_findings:
+            self._findings = self._findings | findings
+
+        return status, findings
 
     def post_finding(self, name: str, finding: object):
         self._findings[name] = finding

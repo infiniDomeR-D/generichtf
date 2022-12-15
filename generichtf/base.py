@@ -9,6 +9,7 @@ class ProcedureStatus(Enum):
     STAGED = auto()
     ONGOING = auto()
     COULD_NOT_COMPLETE = auto()
+    DEPENDENCY_EXCEPTION = auto()
     EXCEPTED = auto()
     CRASHED = auto()
     CANCELLED = auto()
@@ -65,7 +66,12 @@ class TestSession(ABC):
 
     @property
     @abstractmethod
-    def findings(self):
+    def parameters(self) -> dict:
+        pass
+
+    @property
+    @abstractmethod
+    def findings(self) -> dict:
         pass
 
     @abstractmethod
@@ -73,7 +79,7 @@ class TestSession(ABC):
         pass
 
     @abstractmethod
-    def run_flow(self, flow_name: str):
+    def run_flow(self, flow_name: str, merge_findings: bool = True, parameters: None | dict = None):
         pass
 
     @abstractmethod
