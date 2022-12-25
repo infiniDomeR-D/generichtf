@@ -229,7 +229,7 @@ class ProcedureRunner:
                     if tool_name in self._test_suite.tool_deconstructors:
                         deconstructor = self._test_suite.tool_deconstructors[tool_name]
 
-                        def bound_deconstructor(instance = tool_instance):
+                        def bound_deconstructor(instance=tool_instance):
                             deconstructor(instance)
 
                         self._bound_deconstructors.append(bound_deconstructor)
@@ -302,6 +302,10 @@ class PrimaryTestSession(TestSession):
     @property
     def findings(self):
         return self._findings
+
+    @property
+    def configurations(self) -> dict:
+        return self.test_suite.configurations
 
     def stage_procedure(self, procedure_name: str, **parameters):
         procedure_entry = self.test_suite.procedures[procedure_name]

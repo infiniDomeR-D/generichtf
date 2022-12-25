@@ -74,6 +74,11 @@ class TestSession(ABC):
     def findings(self) -> dict:
         pass
 
+    @property
+    @abstractmethod
+    def configurations(self) -> dict:
+        pass
+
     @abstractmethod
     def stage_procedure(self, procedure_name: str, **parameters) -> ProcedureHandle:
         pass
